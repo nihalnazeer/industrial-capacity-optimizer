@@ -1,290 +1,171 @@
-# Industrial Capacity & Resource Planning Optimizer
+# Industrial Capacity & Resource Planning Optimizer: Deterministic vs. Scenario-Based Planning
 
-> A scenario-based Operations Research framework for production planning under demand uncertainty.
-
-An Operations Research project that develops a production planning optimizer for manufacturing environments with uncertain demand. The optimizer compares deterministic production planning with scenario-based planning to quantify the operational cost of assuming that demand is known exactly.
+An Operations Research project comparing two production-planning philosophies — planning against a single demand forecast versus planning across multiple demand scenarios — to quantify the cost of demand uncertainty in capacity allocation.
 
 ---
 
-# Problem Statement
+## 1. Problem Statement
 
-Manufacturing systems operate with a fixed pool of resources such as machines, workstations, or workforce shifts. These resources have limited production capacity, while customer demand varies over time and is rarely known with certainty.
+A manufacturing/planning environment has a fixed pool of resources (machines, workstations, or workforce shifts) with limited capacity per period. Demand for production (jobs/orders) must be allocated to resources within capacity limits, at minimum cost, while meeting delivery targets — but **demand is not known with certainty in advance**.
 
-The objective is to allocate production across available resources while:
-
-- minimizing production cost
-- respecting machine capacity constraints
-- limiting overtime usage
-- maximizing demand fulfillment
-
-The project investigates a fundamental planning question:
-
-> **How much does planning as if demand is known exactly cost when demand is actually uncertain?**
+This project answers a concrete question: **how much does planning "as if demand is known exactly" cost you when it isn't — and what's the alternative?**
 
 ---
 
-# Problem Logic
+## 2. Problem Logic
 
-Although this is not a physical simulation, the planning process behaves like a constrained flow network.
+There's no physical system underlying this problem — the structure is a **constraint-satisfaction and allocation problem**, similar to a flow-network:
 
-## Conservation
-
-Every unit of customer demand must be:
-
-- produced during regular working hours,
-- produced using overtime capacity, or
-- recorded as unmet demand.
-
-## Capacity Constraints
-
-Each machine has:
-
-- Regular production capacity
-- Overtime production capacity
-
-Regular production is cheaper.
-
-Overtime provides flexibility but incurs additional cost.
-
-## Operational Challenge
-
-Capacity decisions (shift allocation, machine loading, workforce assignment) are committed **before** actual demand is observed.
-
-A deterministic plan is optimal only if the forecast is correct.
-
-Scenario-based planning instead evaluates a single production plan across multiple possible demand outcomes.
+- **Conservation:** every unit of demand must be satisfied by some combination of regular-time and overtime capacity, or explicitly logged as unmet.
+- **Capacity as a hard limit:** each resource has a maximum throughput per period — regular hours are cheap capacity, overtime is expensive extra capacity available only up to a cap.
+- **The core tension:** capacity commitments (e.g. shift assignments) are made *before* actual demand is known. A plan built for one demand level is efficient for that level, but rigid and costly if the real outcome differs. Scenario-based planning addresses this by evaluating a single committed plan against multiple possible futures, rather than optimizing for only one.
 
 ---
 
-# Mathematical Formulation
+## 3. Mathematical Formulation
 
-## Sets
+### Sets and Indices
+- $j \in J$ — job/order types
+- $m \in M$ — machines/resources
+- $t \in T$ — time periods (e.g. days or shifts)
+- $s \in S = \{\text{low}, \text{expected}, \text{high}\}$ — demand scenarios
 
-| Symbol | Description |
-|---------|-------------|
-| **J** | Jobs / Product Types |
-| **M** | Machines / Resources |
-| **T** | Planning Periods |
-| **S** | Demand Scenarios (Low, Expected, High) |
-
----
-
-## Scenario Probabilities
+### Scenario Probabilities
 
 | Scenario | Probability |
-|-----------|------------:|
+|---|---:|
 | Low | 0.20 |
 | Expected | 0.60 |
 | High | 0.20 |
 
----
+### Parameters
+- $d_{j,t,s}$ — demand for job $j$ in period $t$ under scenario $s$
+- $c_m$ — regular capacity of machine $m$ per period
+- $o_m$ — maximum overtime capacity of machine $m$ per period
+- $cost_m$ — regular-time cost per unit produced on machine $m$
+- $cost^{OT}_m$ — overtime cost per unit produced on machine $m$ (> $cost_m$)
+- $\pi$ — penalty cost per unit of unmet demand
 
-## Parameters
+### Decision Variables
+- $x_{j,m,t} \geq 0$ — units of job $j$ produced on machine $m$ in period $t$, regular time
+- $y_{j,m,t} \geq 0$ — units of job $j$ produced on machine $m$ in period $t$, overtime
+- $u_{j,t,s} \geq 0$ — unmet demand for job $j$, period $t$, scenario $s$
 
-| Parameter | Description |
-|-----------|-------------|
-| \(d_{j,t,s}\) | Demand for job *j* during period *t* under scenario *s* |
-| \(c_m\) | Regular capacity of machine *m* |
-| \(o_m\) | Maximum overtime capacity |
-| \(cost_m\) | Regular production cost |
-| \(cost^{OT}_m\) | Overtime production cost |
-| \(\pi\) | Penalty cost for unmet demand |
+### 3.1 Deterministic Model (baseline)
 
----
+Plans against the expected-demand scenario only:
 
-## Decision Variables
+$$\min \sum_{j,m,t} cost_m \cdot x_{j,m,t} + cost^{OT}_m \cdot y_{j,m,t} + \pi \cdot u_{j,t,\text{expected}}$$
 
-| Variable | Description |
-|-----------|-------------|
-| \(x_{j,m,t}\) | Regular-time production |
-| \(y_{j,m,t}\) | Overtime production |
-| \(u_{j,t,s}\) | Unmet demand |
+Subject to:
 
----
+$$\sum_j x_{j,m,t} \leq c_m \quad \forall m,t$$
+$$\sum_j y_{j,m,t} \leq o_m \quad \forall m,t$$
+$$\sum_m (x_{j,m,t} + y_{j,m,t}) + u_{j,t,\text{expected}} \geq d_{j,t,\text{expected}} \quad \forall j,t$$
 
-# Deterministic Planning Model
+This plan is optimal for exactly one future and has no visibility into what happens if demand deviates.
 
-The baseline optimizer assumes the expected demand forecast is perfectly accurate.
+### 3.2 Scenario-Based Model
 
-### Objective
+Capacity commitments ($x_{j,m,t}$, $y_{j,m,t}$) are made once, in advance — they cannot vary by scenario, since shift/resource decisions are locked in before actual demand is observed. Demand fulfillment is evaluated across **all** scenarios, weighted by probability:
 
-Minimize
+$$\min \sum_{j,m,t} cost_m \cdot x_{j,m,t} + cost^{OT}_m \cdot y_{j,m,t} + \sum_{s} p_s \cdot \pi \cdot u_{j,t,s}$$
 
-- Regular production cost
-- Overtime cost
-- Unmet demand penalty
+Subject to the same capacity constraints, plus:
 
-subject to
+$$\sum_m (x_{j,m,t} + y_{j,m,t}) + u_{j,t,s} \geq d_{j,t,s} \quad \forall j,t,s$$
 
-- machine capacity
-- overtime capacity
-- demand satisfaction
+This is a **scenario-based (stochastic) programming** formulation — it minimizes *expected* unmet-demand penalty across weighted scenarios, hedging against uncertainty rather than optimizing for a single forecast.
 
-This optimizer only plans for a **single future**.
+> **Note on terminology:** this is deliberately called *scenario-based* rather than *robust* optimization. Classical robust optimization minimizes the worst case ($\min \max_s Cost_s$) or defines uncertainty sets; this model minimizes expected cost across weighted scenarios, which is stochastic programming. A true minimax-robust variant is noted as future work in Section 8.
 
 ---
 
-# Scenario-Based Planning Model
-
-The scenario-based formulation keeps the same production decisions but evaluates them under multiple demand scenarios.
-
-Capacity allocations are committed **before** demand is observed.
-
-Demand satisfaction is evaluated under:
-
-- Low Demand
-- Expected Demand
-- High Demand
-
-weighted by their respective probabilities.
-
-The optimizer minimizes the **expected production cost and unmet demand penalty** across all scenarios.
-
-> **Note**
->
-> This implementation is a **scenario-based stochastic programming** model.
->
-> It is intentionally distinguished from classical robust optimization, which typically minimizes the worst-case objective or optimizes over uncertainty sets.
-
----
-
-# Performance Metrics
-
-Both planning approaches are evaluated using the same operational KPIs.
+## 4. Metrics Reported
 
 | Metric | Deterministic | Scenario-Based |
-|---------|:-------------:|:--------------:|
-| Production Cost | ✓ | ✓ |
+|---|---|---|
+| Production Cost (expected) | ✓ | ✓ |
 | Overtime Hours | ✓ | ✓ |
-| Capacity Utilization | ✓ | ✓ |
-| Demand Fulfillment | ✓ | ✓ |
-| Unmet Demand | ✓ | ✓ |
-| Worst-Case Scenario Cost | ✓ | ✓ |
+| Capacity Utilization (%) | ✓ | ✓ |
+| Demand Fulfillment Rate | ✓ | ✓ |
+| Unmet Demand (units) | ✓ | ✓ |
+| Worst-case Scenario Cost | ✓ | ✓ |
 
-### Capacity Utilization
+**Capacity Utilization** is computed as:
 
-\[
-Utilization =
-\frac{Regular\ Production + Overtime\ Production}
-{Available\ Capacity}
-\times 100
-\]
+$$\text{Utilization} = \frac{\text{Regular Production} + \text{Overtime Production}}{\text{Available Capacity (Regular + Overtime)}} \times 100$$
 
-Including overtime prevents heavily overloaded schedules from appearing artificially under-utilized.
+Overtime is included in the numerator so that a plan leaning heavily on overtime isn't misleadingly reported as "low utilization."
 
----
+**Unmet Demand** is reported explicitly — this is the quantity ($u_{j,t,s}$) the optimizer is directly minimizing, and it deserves visibility rather than staying buried inside the cost total.
 
-# Expected Outcome
-
-The deterministic optimizer is expected to achieve the lowest cost **only when demand exactly matches the forecast**.
-
-The scenario-based optimizer sacrifices a small amount of expected efficiency in exchange for:
-
-- lower worst-case cost
-- higher demand fulfillment
-- reduced unmet demand
-- improved operational resilience
+**Expected result:** the deterministic plan wins on expected-case cost but degrades sharply in worst-case cost and fulfillment when demand deviates from the forecast. The scenario-based plan trades a small amount of expected-case efficiency for materially better worst-case resilience.
 
 ---
 
-# Dataset Design
+## 5. Dataset Design
 
-The project uses intentionally designed synthetic data rather than randomly generated values.
+Synthetic data, deliberately structured (not randomly generated) so the optimizer faces genuinely interesting trade-offs:
 
-## Machines
+| Machine | Profile |
+|---|---|
+| A | Cheap, low capacity |
+| B | Expensive, high capacity |
+| C | Fast, limited overtime availability |
 
-| Machine | Characteristics |
-|-----------|----------------|
-| Machine A | Low cost, limited capacity |
-| Machine B | High cost, large capacity |
-| Machine C | High speed, limited overtime |
-
-This forces meaningful allocation decisions rather than trivial optimization.
+This mix forces the model to make real allocation trade-offs between cost and flexibility, rather than trivially assigning everything to one "best" resource.
 
 ---
 
-# Technology Stack
+## 6. Tech Stack
 
-| Layer | Technology |
-|---------|------------|
-| Optimization | PuLP (CBC Solver) |
-| Data Processing | Pandas |
-| Scenario Engine | Python |
-| Dashboard | Streamlit |
-| Visualization | Matplotlib / Plotly |
+| Layer | Tool | Why |
+|---|---|---|
+| Optimization | PuLP (CBC solver) | Clean LP/IP modeling in Python, free bundled solver |
+| Data handling | pandas | Standard, consistent with the companion RUL project |
+| Scenario logic | Plain Python (`scenarios.py`) | No need for simulation machinery at 3 scenarios |
+| Dashboard | Streamlit | Consistent with the RUL project's dashboard |
+| Visualization | matplotlib / plotly | Utilization and cost comparison charts |
 
 ---
 
-# Project Structure
+## 7. Architecture
 
-```text
-industrial-capacity-optimizer/
-
+```
+capacity-resource-optimizer/
 ├── README.md
 ├── requirements.txt
-
 ├── data/
-│   ├── jobs.csv
-│   ├── machines.csv
-│   └── scenarios.csv
-
+│   ├── jobs.csv          ← job types, demand baseline
+│   ├── machines.csv      ← capacity, regular/overtime cost per machine
+│   └── scenarios.csv     ← low/expected/high demand multipliers + probabilities
 ├── src/
-│   ├── model.py
-│   ├── solve.py
-│   ├── scenarios.py
-│   ├── metrics.py
-│   └── evaluate.py
-
+│   ├── model.py           ← builds deterministic & scenario-based LP formulations
+│   ├── solve.py            ← solves with PuLP, returns allocation
+│   ├── scenarios.py        ← scenario generation and probability weighting
+│   ├── metrics.py          ← computes utilization, fulfillment, unmet demand, cost KPIs
+│   └── evaluate.py          ← runs both plans across all scenarios for comparison
 ├── notebooks/
-│   └── 01_optimizer_walkthrough.ipynb
-
+│   └── 01_optimizer_walkthrough.ipynb   ← formulation walkthrough + results
 ├── app/
-│   └── streamlit_app.py
-
+│   └── streamlit_app.py     ← deterministic vs. scenario-based KPI comparison view
 └── reports/
     └── figures/
 ```
 
 ---
 
-# Scope
+## 8. Scope and Future Work
 
-The current implementation includes:
+**Locked scope for this project:** one LP/IP core model, deterministic vs. scenario-based comparison, 3 demand scenarios, the KPI table above. Deliberately excluded from this version: Monte Carlo simulation, reinforcement learning, genetic algorithms, digital-twin simulation, multi-objective optimization, and inventory optimization — worthwhile directions, kept out to preserve a focused, finishable scope.
 
-- Deterministic production planning
-- Scenario-based production planning
-- Three demand scenarios
-- Production allocation optimization
-- KPI comparison dashboard
-
-The following are intentionally excluded to maintain a focused project scope:
-
-- Monte Carlo Simulation
-- Reinforcement Learning
-- Genetic Algorithms
-- Digital Twin Simulation
-- Multi-objective Optimization
-- Inventory Optimization
+**Future extensions:**
+- A true minimax robust formulation ($\min \max_s Cost_s$), to complement the current expected-cost scenario model
+- Linking predicted equipment failures (from a companion predictive-maintenance model) as a capacity constraint, so a predicted maintenance event automatically reduces available capacity in the optimizer — connecting prediction to operational decision-making
 
 ---
 
-# Future Work
+## 9. Key Takeaway
 
-Potential extensions include:
-
-- Classical minimax robust optimization
-- Maintenance-aware production planning
-- Dynamic demand forecasting
-- Multi-period scheduling
-- Inventory optimization
-- Supply chain integration
-
-A particularly interesting extension is integrating the companion predictive maintenance project so that predicted machine failures automatically reduce available production capacity before optimization.
-
----
-
-# Key Takeaway
-
-Rather than building a different optimization model, this project demonstrates how incorporating demand uncertainty into the planning process fundamentally changes operational decisions.
-
-The comparison shows that planning against a single forecast may maximize short-term efficiency but can perform poorly when demand deviates from expectations, whereas a scenario-based planning strategy provides a more resilient production plan with improved performance across uncertain operating conditions.
+Planning against a single demand forecast is efficient only if that forecast is correct. This project quantifies the cost of that assumption failing, and shows that a modest, well-defined hedge — a scenario-based formulation using the same underlying optimization model — meaningfully improves resilience without requiring a fundamentally different (or more complex) approach.
