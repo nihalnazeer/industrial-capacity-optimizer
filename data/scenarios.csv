@@ -1,0 +1,4 @@
+scenario,probability,demand_multiplier
+low,0.20,0.8
+expected,0.60,1.0
+high,0.20,1.3
