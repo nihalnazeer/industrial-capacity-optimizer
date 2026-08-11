@@ -1,4 +1,5 @@
 machine_id,regular_capacity,overtime_capacity,regular_cost,overtime_cost
-A,100,20,5,9
-B,200,40,8,12
-C,150,10,6,15
+A,90,25,5,8
+B,110,30,7,10
+C,80,20,6,9
+D,70,35,4,7

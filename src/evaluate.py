@@ -3,7 +3,17 @@ evaluate.py
 
 Orchestrates the full comparison: solves both the deterministic
 and scenario-based models, evaluates each against all demand
-scenarios, and produces the final KPI comparison table.
+scenarios, and returns both the KPI comparison table and the
+underlying production plans (so the dashboard can build richer
+visualizations without recomputing anything).
+
+In addition to the "expected"-scenario fulfillment numbers, this
+also tracks which scenario actually drives the worst-case cost and
+how much demand goes unmet there — the earlier version only
+reported unmet demand for the expected scenario, which made a
+100%-fulfillment result look inconsistent with a much higher
+worst-case cost that was, in fact, coming from the high-demand
+scenario.
 """
 
 from __future__ import annotations
@@ -33,7 +43,8 @@ def evaluate_plan_across_scenarios(
     """
     Given a fixed production plan (regular/overtime units per job-machine-period),
     evaluate how much demand goes unmet under each demand scenario, and compute
-    the resulting KPIs.
+    the resulting KPIs — including which scenario drives the worst-case cost
+    and how much demand is unmet specifically in that scenario.
     """
     supply = (
         production_df.groupby(["job", "period"])[["regular_units", "overtime_units"]]
@@ -41,7 +52,10 @@ def evaluate_plan_across_scenarios(
         .sum(axis=1)
     )
 
+    base_cost = production_cost(production_df, machines_df)
+
     scenario_costs = {}
+    unmet_by_scenario = {}
     total_unmet_expected = 0.0
     total_demand_expected = 0.0
 
@@ -55,15 +69,17 @@ def evaluate_plan_across_scenarios(
             supplied = supply.get((j, t), 0.0)
             unmet_total += max(0.0, d - supplied)
 
-        cost = production_cost(production_df, machines_df) + UNMET_PENALTY * unmet_total
-        scenario_costs[s] = cost
+        unmet_by_scenario[s] = unmet_total
+        scenario_costs[s] = base_cost + UNMET_PENALTY * unmet_total
 
         if s == "expected":
             total_unmet_expected = unmet_total
             total_demand_expected = demand.sum()
 
+    worst_scenario = max(scenario_costs, key=scenario_costs.get)
+
     return {
-        "production_cost": production_cost(production_df, machines_df),
+        "production_cost": base_cost,
         "overtime_hours": overtime_hours(production_df),
         "capacity_utilization": capacity_utilization(production_df, machines_df),
         "unmet_demand_expected": total_unmet_expected,
@@ -71,11 +87,18 @@ def evaluate_plan_across_scenarios(
             total_demand_expected, total_unmet_expected
         ),
         "worst_case_cost": worst_case_cost(scenario_costs),
+        "worst_case_scenario": worst_scenario,
+        "unmet_demand_worst_case": unmet_by_scenario[worst_scenario],
     }
 
 
-def run_comparison(data_dir: str | Path) -> pd.DataFrame:
-    """Run both plans and return the final deterministic vs. scenario-based KPI table."""
+def run_comparison(data_dir: str | Path) -> dict:
+    """
+    Run both plans and return a dict containing:
+      - comparison: the Deterministic vs. Scenario-Based KPI table
+      - deterministic_plan / scenario_plan: the underlying production DataFrames
+      - machines / jobs / scenarios: the input data, for downstream visualization
+    """
     data_dir = Path(data_dir)
     jobs_df = pd.read_csv(data_dir / "jobs.csv")
     machines_df = pd.read_csv(data_dir / "machines.csv")
@@ -97,9 +120,17 @@ def run_comparison(data_dir: str | Path) -> pd.DataFrame:
         "Deterministic": det_kpis,
         "Scenario-Based": scen_kpis,
     })
-    return comparison
+
+    return {
+        "comparison": comparison,
+        "deterministic_plan": det_production,
+        "scenario_plan": scen_production,
+        "machines": machines_df,
+        "jobs": jobs_df,
+        "scenarios": scenarios_df,
+    }
 
 
 if __name__ == "__main__":
-    result = run_comparison(Path(__file__).resolve().parent.parent / "data")
-    print(result)
+    results = run_comparison(Path(__file__).resolve().parent.parent / "data")
+    print(results["comparison"])

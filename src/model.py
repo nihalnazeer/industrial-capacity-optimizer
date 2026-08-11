@@ -12,7 +12,7 @@ import pulp
 import pandas as pd
 
 
-UNMET_PENALTY = 1000  # pi: large penalty per unit of unmet demand
+UNMET_PENALTY = 50  # pi: penalty per unit of unmet demand
 
 
 def build_deterministic_model(

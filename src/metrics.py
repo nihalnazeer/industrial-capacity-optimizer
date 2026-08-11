@@ -3,7 +3,9 @@ metrics.py
 
 KPI computation for comparing deterministic vs. scenario-based
 capacity plans: cost, overtime, utilization, fulfillment,
-unmet demand, and worst-case scenario cost.
+unmet demand, and worst-case scenario cost. Also includes
+helpers that reshape production plans for visualization
+(machine-level utilization, machine x job production matrix).
 """
 
 from __future__ import annotations
@@ -50,3 +52,34 @@ def demand_fulfillment_rate(total_demand: float, total_unmet: float) -> float:
 def worst_case_cost(scenario_costs: dict) -> float:
     """Highest total cost (production + unmet penalty) across evaluated scenarios."""
     return float(max(scenario_costs.values()))
+
+
+def utilization_by_machine(production_df: pd.DataFrame, machines_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Utilization percentage per individual machine, for gauge/bar
+    visualizations (as opposed to the single aggregate figure
+    from capacity_utilization()).
+    """
+    machine_params = machines_df.set_index("machine_id")
+    n_periods = production_df["period"].nunique()
+    rows = []
+    for m, row in machine_params.iterrows():
+        used = production_df.loc[
+            production_df["machine"] == m, ["regular_units", "overtime_units"]
+        ].sum().sum()
+        available = (row["regular_capacity"] + row["overtime_capacity"]) * n_periods
+        utilization = float(100 * used / available) if available > 0 else 0.0
+        rows.append({"machine": m, "utilization": utilization})
+    return pd.DataFrame(rows)
+
+
+def production_matrix(production_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pivot total production units (regular + overtime, summed across periods)
+    into a machine x job matrix — the shape needed for a heatmap or
+    3D surface plot of the allocation.
+    """
+    df = production_df.copy()
+    df["total_units"] = df["regular_units"] + df["overtime_units"]
+    matrix = df.groupby(["machine", "job"])["total_units"].sum().unstack(fill_value=0)
+    return matrix
